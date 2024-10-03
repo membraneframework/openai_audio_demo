@@ -31,7 +31,7 @@ defmodule OpenAIElement do
   require Membrane.Logger
 
   def_input_pad :input, accepted_format: _any
-  # def_output_pad :output, accepted_format: _any
+  def_output_pad :output, accepted_format: _any, flow_control: :push
 
   def_options websocket_opts: []
 
@@ -39,6 +39,12 @@ defmodule OpenAIElement do
   def handle_init(_ctx, opts) do
     {:ok, ws} = OpenAIWebSocket.start_link(opts.websocket_opts)
     {[], %{ws: ws}}
+  end
+
+  @impl true
+  def handle_playing(_ctx, state) do
+    format = %Membrane.RawAudio{channels: 1, sample_rate: 24_000, sample_format: :s16le}
+    {[stream_format: {:output, format}], state}
   end
 
   @impl true
@@ -71,14 +77,15 @@ defmodule OpenAIElement do
   defp create_response(ws) do
     # frame = Jason.encode(%{type: "input_audio_buffer.commit"})
     frame = Jason.encode(%{type: "response.create"})
-    :ok = OpenAIWebSocket.send_frame(state.ws, frame)
+    :ok = OpenAIWebSocket.send_frame(ws, frame)
   end
 
   @impl true
   def handle_info({:websocket_frame, frame}, _ctx, state) do
     decoded_frame = Jason.decode!(frame)
     dbg(decoded_frame, label: "DECODED FRAME")
-    {[], state}
+    # {[], state}
+    {[buffer: {:output, %Membrane.Buffer{payload: decoded_frame.audio}}], state}
   end
 end
 
@@ -89,16 +96,22 @@ defmodule BrowserToOpenAi do
   def handle_init(_ctx, opts) do
     spec =
       child(:webrtc_source, %Membrane.WebRTC.Source{
-        signaling: {:websocket, port: opts[:webrtc_ws_port]}
+        signaling: {:websocket, port: opts[:webrtc_source_ws_port]}
       })
       |> via_out(:output, options: [kind: :audio])
       |> child(:opus_parser, Membrane.Opus.Parser)
       |> child(:opus_decoder, %Membrane.Opus.Decoder{sample_rate: 24_000})
       |> child(:open_ai, %OpenAIElement{websocket_opts: opts[:openai_ws_opts]})
+      |> child(:raw_audio_parser, Membrane.RawAudioParser)
+      |> child(:opus_encoder, Membrane.Opus.Encoder)
+      |> via_in(:input, options: [kind: :audio])
+      |> child(:webrtc_sink, %Membrane.WebRTC.Sink{
+        signaling: {:websocket, port: opts[:webrtc_source_ws_port]}
+      })
 
     self() |> Process.send_after(:create_response, 10_000)
 
-    {[spec: spec], state}
+    {[spec: spec], %{}}
   end
 
   @impl true

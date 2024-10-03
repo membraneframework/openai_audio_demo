@@ -39,6 +39,8 @@ defmodule Membrane.Template.Mixfile do
     [
       {:membrane_core, "~> 1.1"},
       {:membrane_webrtc_plugin, "~> 0.22.0"},
+      {:membrane_opus_plugin, "~> 0.20.3"},
+      {:membrane_raw_audio_parser_plugin, "~> 0.4.0"    },
       {:bandit, "~> 1.2"},
       {:websock_adapter, "~> 0.5.0"},
       {:websockex, "~> 0.4.3"},
