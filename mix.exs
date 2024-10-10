@@ -37,7 +37,18 @@ defmodule Membrane.Template.Mixfile do
 
   defp deps do
     [
-      {:membrane_core, "~> 1.0"},
+      {:membrane_core, "~> 1.1"},
+      {:membrane_webrtc_plugin, "~> 0.22.0"},
+      {:membrane_opus_plugin, "~> 0.20.3"},
+      # {:membrane_raw_audio_parser_plugin, "~> 0.4.0"},
+      {:membrane_raw_audio_parser_plugin, path: "../membrane_raw_audio_parser_plugin"},
+      {:membrane_portaudio_plugin, "~> 0.19.2"},
+      {:membrane_realtimer_plugin, "~> 0.9.0"},
+      # {:membrane_audio_filler_plugin, path: "../membrane_audio_filler_plugin"},
+      {:bandit, "~> 1.2"},
+      {:websock_adapter, "~> 0.5.0"},
+      {:websockex, "~> 0.4.3"},
+      {:jason, "~> 1.4"},
       {:ex_doc, ">= 0.0.0", only: :dev, runtime: false},
       {:dialyxir, ">= 0.0.0", only: :dev, runtime: false},
       {:credo, ">= 0.0.0", only: :dev, runtime: false}
