@@ -21,11 +21,6 @@ defmodule OpenAIWebSocket do
   end
 end
 
-defmodule CreateResponseEvent do
-  @derive Membrane.EventProtocol
-  defstruct []
-end
-
 defmodule OpenAIElement do
   use Membrane.Endpoint
   require Membrane.Logger
@@ -52,44 +47,22 @@ defmodule OpenAIElement do
     audio = Base.encode64(buffer.payload)
     frame = %{type: "input_audio_buffer.append", audio: audio} |> Jason.encode!()
     :ok = OpenAIWebSocket.send_frame(state.ws, frame)
-
-    # frame = Jason.encode!(%{type: "input_audio_buffer.commit"})
-    # :ok = OpenAIWebSocket.send_frame(state.ws, frame)
-
     {[], state}
-  end
-
-  @impl true
-  def handle_parent_notification(:create_response, _ctx, state) do
-    create_response(state.ws)
-    {[], state}
-  end
-
-  @impl true
-  def handle_event(:input, %CreateResponseEvent{}, _ctx, state) do
-    create_response(state.ws)
-    {[], state}
-  end
-
-  @impl true
-  def handle_event(pad, event, _ctx, state) do
-    Membrane.Logger.info("Event #{inspect(event)} from pad #{inspect(pad)} ignored.")
-    {[], state}
-  end
-
-  defp create_response(ws) do
-    # frame = Jason.encode(%{type: "input_audio_buffer.commit"})
-    # frame = Jason.encode!(%{type: "response.create"})
-    # :ok = OpenAIWebSocket.send_frame(ws, frame)
   end
 
   @impl true
   def handle_info({:websocket_frame, {:text, frame}}, _ctx, state) do
-    with %{"type" => "response.audio.delta", "delta" => delta} <- Jason.decode!(frame) |> dbg(label: "DECODE") do
-      audio_payload = Base.decode64!(delta)
-      {[buffer: {:output, %Membrane.Buffer{payload: audio_payload}}], state}
-    else
-      %{} -> {[], state}
+    case Jason.decode!(frame) do
+      %{"type" => "response.audio.delta", "delta" => delta} ->
+        audio_payload = Base.decode64!(delta)
+        {[buffer: {:output, %Membrane.Buffer{payload: audio_payload}}], state}
+
+      %{"type" => "response.audio_transcript.done", "transcript" => transcript} ->
+        dbg(transcript)
+        {[], state}
+
+      other ->
+        {[], state}
     end
   end
 end
@@ -104,32 +77,27 @@ defmodule BrowserToOpenAi do
         signaling: {:websocket, port: opts[:webrtc_source_ws_port]}
       })
       |> via_out(:output, options: [kind: :audio])
-      |> child(:opus_parser, Membrane.Opus.Parser)
+      |> child(:input_opus_parser, Membrane.Opus.Parser)
       |> child(:opus_decoder, %Membrane.Opus.Decoder{sample_rate: 24_000})
       |> child(:open_ai, %OpenAIElement{websocket_opts: opts[:openai_ws_opts]})
-      |> child(:raw_audio_parser, Membrane.RawAudioParser)
-      |> child(:portaudio_sink, Membrane.PortAudio.Sink)
-
-    # |> child(:opus_encoder, Membrane.Opus.Encoder)
-    # |> via_in(:input, options: [kind: :audio])
-    # |> child(:webrtc_sink, %Membrane.WebRTC.Sink{
-    #   signaling: {:websocket, port: opts[:webrtc_sink_ws_port]}
-    # })
-
-    # self() |> Process.send_after(:create_response, 10_000)
+      # |> child(:portaudio_sink, Membrane.PortAudio.Sink)
+      |> child(:raw_audio_parser, %Membrane.RawAudioParser{overwrite_pts?: true, pts_generation_policy: :realtime})
+      |> child(:opus_encoder, Membrane.Opus.Encoder)
+      |> via_in(:input, target_queue_size: 1000, toilet_capacity: 1_000_000)
+      |> child(:realtimer, Membrane.Realtimer)
+      |> via_in(:input, options: [kind: :audio])
+      |> child(:webrtc_sink, %Membrane.WebRTC.Sink{
+        tracks: [:audio],
+        signaling: {:websocket, port: opts[:webrtc_sink_ws_port]}
+      })
 
     {[spec: spec], %{}}
   end
 
-  @impl true
-  def handle_info(:create_response, _ctx, state) do
-    {[notify_child: {:open_ai, :create_response}], state}
-  end
-
-  @impl true
-  def handle_element_end_of_stream(:open_ai, :input, _ctx, state) do
-    {[terminate: :normal], state}
-  end
+  # @impl true
+  # def handle_element_end_of_stream(:open_ai, :input, _ctx, state) do
+  #   {[terminate: :normal], state}
+  # end
 end
 
 openai_api_key = System.get_env("OPENAI_API_KEY")
@@ -149,7 +117,7 @@ openai_ws_opts = [
   Membrane.Pipeline.start_link(BrowserToOpenAi,
     openai_ws_opts: openai_ws_opts,
     webrtc_source_ws_port: 8829,
-    webrtc_sink_ws_port: 8830
+    webrtc_sink_ws_port: 8831
   )
 
 {:ok, _server} =
