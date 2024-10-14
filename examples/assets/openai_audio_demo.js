@@ -58,16 +58,16 @@ const start_connection_browser_to_elixir = async (ws) => {
   ws.send(JSON.stringify({ type: "sdp_offer", data: offer }));
 };
 
-const videoPlayer = document.getElementById("videoPlayer");
+const audioPlayer = document.getElementById("audioPlayer");
 const wsElixirToBrowser = new WebSocket(`${proto}//${window.location.hostname}:8831`);
 wsElixirToBrowser.onopen = () => start_connection_elixir_to_browser(wsElixirToBrowser);
 wsElixirToBrowser.onclose = (event) => console.log("WebSocket connection was terminated:", event);
 
 const start_connection_elixir_to_browser = async (ws) => {
-  videoPlayer.srcObject = new MediaStream();
+  audioPlayer.srcObject = new MediaStream();
 
   const pc = new RTCPeerConnection(pcConfig);
-  pc.ontrack = (event) => videoPlayer.srcObject.addTrack(event.track);
+  pc.ontrack = (event) => audioPlayer.srcObject.addTrack(event.track);
   pc.onicecandidate = (event) => {
     if (event.candidate === null) return;
 
