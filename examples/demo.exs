@@ -16,9 +16,7 @@ defmodule OpenAIWebSocket do
     {:ok, state}
   end
 
-  def send_frame(ws, frame) do
-    WebSockex.send_frame(ws, {:text, frame})
-  end
+  def send_frame(ws, frame), do: WebSockex.send_frame(ws, {:text, frame})
 end
 
 defmodule OpenAIElement do
@@ -57,11 +55,14 @@ defmodule OpenAIElement do
         audio_payload = Base.decode64!(delta)
         {[buffer: {:output, %Membrane.Buffer{payload: audio_payload}}], state}
 
+      %{"type" => "response.audio.done"} ->
+        {[event: {:output, %Membrane.Realtimer.Events.Reset{}}], state}
+
       %{"type" => "response.audio_transcript.done", "transcript" => transcript} ->
-        dbg(transcript)
+        Membrane.Logger.info("AI transcription: #{transcript}")
         {[], state}
 
-      other ->
+      %{} ->
         {[], state}
     end
   end
@@ -80,11 +81,10 @@ defmodule BrowserToOpenAi do
       |> child(:input_opus_parser, Membrane.Opus.Parser)
       |> child(:opus_decoder, %Membrane.Opus.Decoder{sample_rate: 24_000})
       |> child(:open_ai, %OpenAIElement{websocket_opts: opts[:openai_ws_opts]})
-      # |> child(:portaudio_sink, Membrane.PortAudio.Sink)
-      |> child(:raw_audio_parser, %Membrane.RawAudioParser{overwrite_pts?: true, pts_generation_policy: :realtime})
-      |> child(:opus_encoder, Membrane.Opus.Encoder)
-      |> via_in(:input, target_queue_size: 1000, toilet_capacity: 1_000_000)
+      |> child(:raw_audio_parser, %Membrane.RawAudioParser{overwrite_pts?: true})
+      |> via_in(:input, target_queue_size: 1_000_000_000, toilet_capacity: 1_000_000_000)
       |> child(:realtimer, Membrane.Realtimer)
+      |> child(:opus_encoder, Membrane.Opus.Encoder)
       |> via_in(:input, options: [kind: :audio])
       |> child(:webrtc_sink, %Membrane.WebRTC.Sink{
         tracks: [:audio],
@@ -93,11 +93,6 @@ defmodule BrowserToOpenAi do
 
     {[spec: spec], %{}}
   end
-
-  # @impl true
-  # def handle_element_end_of_stream(:open_ai, :input, _ctx, state) do
-  #   {[terminate: :normal], state}
-  # end
 end
 
 openai_api_key = System.get_env("OPENAI_API_KEY")
@@ -120,19 +115,18 @@ openai_ws_opts = [
     webrtc_sink_ws_port: 8831
   )
 
-{:ok, _server} =
-  :inets.start(:httpd,
-    bind_address: ~c"localhost",
-    port: 8000,
-    document_root: ~c"#{__DIR__}/assets",
-    server_name: ~c"webrtc",
-    server_root: "/tmp"
-  )
+:inets.start()
+
+:inets.start(:httpd,
+  bind_address: ~c"localhost",
+  port: 8000,
+  document_root: ~c"#{__DIR__}/assets",
+  server_name: ~c"webrtc",
+  server_root: "/tmp"
+)
 
 Process.monitor(pipeline)
 
 receive do
   {:DOWN, _ref, :process, ^pipeline, _reason} -> :ok
 end
-
-# The server's responses timing depends on the turn_detection configuration (set with session.update after a session is started):
